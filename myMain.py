@@ -116,16 +116,18 @@ cpvs_licitacion: dict[str, str] = {}
 # =========================================================
 @app.get("/licitaciones_es")
 async def licitaciones_es(
-    comunidades: List[str] = Query(..., description="Lista de comunidades autónomas (puedes indicar varias separadas por coma o en lista)"),
+    comunidades: List[str] = Query(...),
     limit: int = Query(30, ge=1, le=300)
 ):
     """
-    Obtiene licitaciones filtradas por comunidades autónomas.
+    Obtiene licitaciones filtradas por comunidades autónomas
+    Y ADEMÁS genera automáticamente los CPVs para que /cpv_disponibles funcione sin pasos extra.
     """
-    global Licitaciones_url
+    global Licitaciones_url, cpvs_licitacion
     Licitaciones_url = []
+    cpvs_licitacion = {}  # 🔥 limpiamos CPVs para nueva búsqueda
 
-    # Normaliza nombres de comunidades
+    # Normalizar parámetros
     comunidades_normalizadas = []
     for param in comunidades:
         for c in param.split(","):
@@ -150,15 +152,13 @@ async def licitaciones_es(
 
                     blob = _text(e)
 
-                    # 🟢 Expandir comunidades a provincias
+                    # Provincias filtradas
                     provincias_filtrar = []
                     for c in comunidades_normalizadas:
-                        provincias_filtrar.extend(COMUNIDADES.get(c, [c]))  # si no está en el mapa, usa tal cual
+                        provincias_filtrar.extend(COMUNIDADES.get(c, [c]))
 
-                    # 🟢 Filtra por provincias o comunidad
                     if not any(p in blob for p in provincias_filtrar):
                         continue
-
 
                     importe = _parse_importe(blob)
                     organo = _parse_organo(blob)
@@ -184,11 +184,21 @@ async def licitaciones_es(
             except Exception as e:
                 print(f"⚠️ Error leyendo {feed_url}: {e}")
 
-    # ⚠️ Si no encontró ninguna licitación, avisar
     if not Licitaciones_url:
-        raise HTTPException(status_code=404, detail="No se encontraron licitaciones para esas comunidades.")
+        raise HTTPException(status_code=404, detail="No se encontraron licitaciones.")
+
+    # -------------------------------------------------------------
+    # 🟢 GENERACIÓN AUTOMÁTICA DE CPVs (sin llamar /cpv_licitaciones)
+    # -------------------------------------------------------------
+    print("🟢 Generando CPVs automáticamente...")
+    for url in Licitaciones_url:
+        data = _scrape_via_subprocess(url)
+        cpvs_licitacion[url] = data.get("cpv", "") if isinstance(data, dict) else ""
+
+    print("🟢 CPVs listos.")
 
     return {"count": len(items), "results": items}
+
 
 # =========================================================
 # 2️⃣ SCRAPER DE CPVs (usa subproceso Playwright)
@@ -315,6 +325,7 @@ def detalle_licitacion(url: str = Query(..., description="URL completa (idEvl) d
         data["pliegos_xml"] = []
 
     return data
+
 
 
 
