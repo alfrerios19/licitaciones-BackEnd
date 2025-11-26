@@ -307,28 +307,33 @@ def filtrar_cpvs(cpvs: List[str] = Query(..., description="Lista de CPVs a busca
 # 5️⃣ DETALLE DE LICITACIÓN INDIVIDUAL
 # =========================================================
 @app.get("/detalle_licitacion")
-def detalle_licitacion(url: str = Query(..., description="URL completa (idEvl) del detalle en Plataforma)")):
+async def detalle_licitacion(
+    url: str = Query(..., description="URL detalle HTML de la licitación"),
+    feed: str = Query(..., description="Feed ATOM donde está la licitación")
+):
     """
-    Devuelve datos del detalle de una licitación (título, entidad, CPV, importe)
-    e intenta además obtener los pliegos (PDFs) desde el XML del feed.
+    Devuelve:
+    - título, entidad, CPV, importe (Playwright)
+    - pliegos extraídos del XML real del feed
     """
-    # --- Ejecutar Playwright en subproceso ---
-    data = _scrape_via_subprocess(url)
-    if isinstance(data, dict) and "error" in data:
-        raise HTTPException(status_code=502, detail=f"Error subproceso: {data['error']}")
 
-    # --- Intentar extraer pliegos XML ---
+    # 1️⃣ Ejecutar Playwright (detalle HTML)
+    data = _scrape_via_subprocess(url)
+
+    if isinstance(data, dict) and "error" in data:
+        raise HTTPException(status_code=502, detail=f"Error Playwright: {data['error']}")
+
+    # 2️⃣ Extraer pliegos desde el feed XML
     try:
-        pliegos = asyncio.run(extract_pliegos_from_entry(url))
-        if pliegos:
-            data["pliegos_xml"] = pliegos
-        else:
-            data["pliegos_xml"] = []
+        pliegos = await extract_pliegos_from_entry(entry_url=url, feed_doc_url=feed)
+        data["pliegos_xml"] = pliegos
     except Exception as e:
-        print(f"⚠️ Error extrayendo pliegos XML: {e}")
+        print(f"⚠️ Error extrayendo pliegos: {e}")
         data["pliegos_xml"] = []
 
     return data
+
+
 
 
 
