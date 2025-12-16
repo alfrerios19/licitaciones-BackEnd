@@ -53,69 +53,6 @@ FEEDS = [
 NS = {"atom": "http://www.w3.org/2005/Atom"}
 
 # ---------------------------
-#  DESCARGA Y PAGINACIÓN ATOM (httpx + lxml)
-# ---------------------------
-ATOM_HEADERS = {
-    "Accept": "application/atom+xml",
-    "User-Agent": "Mozilla/5.0 (compatible; AlfredoBot/1.0; +https://tu-repo)"
-}
-
-def _is_xml_content_type(ct: str) -> bool:
-    ct = (ct or "").lower()
-    return "xml" in ct or "application/atom+xml" in ct
-
-async def fetch_atom_async(client: httpx.AsyncClient, url: str) -> etree._Element:
-    """Descarga el feed y valida que la respuesta sea XML; si es HTML, lanza error claro."""
-    resp = await client.get(url, headers=ATOM_HEADERS, follow_redirects=True, timeout=60.0)
-    ct = resp.headers.get("Content-Type", "")
-    if not _is_xml_content_type(ct):
-        # Este es el caso exacto del error que ves: el servidor devolvió HTML.
-        # No intentamos parsear como XML; levantamos error para que lo veas en logs.
-        snippet = resp.text[:300].replace("\n", " ").replace("\r", " ")
-        raise RuntimeError(f"[{url}] Content-Type={ct}. HTML devuelto. Ignorando. Ejemplo: {snippet}")
-    try:
-        return etree.fromstring(resp.content)
-    except etree.XMLSyntaxError as e:
-        raise RuntimeError(f"[{url}] XML inválido: {e}") from e
-
-async def iterate_feed_async(client: httpx.AsyncClient, url: str):
-    """Itera entradas de un feed Atom siguiendo link rel='next' (máx. 500 por fichero)."""
-    actual = url
-    while actual:
-        feed = await fetch_atom_async(client, actual)
-
-        # yield de cada <entry>
-        for entry in feed.findall(".//atom:entry", namespaces=NS):
-            yield entry
-
-        # localizar <link rel="next">
-        next_href = None
-        for link in feed.findall(".//atom:link", namespaces=NS):
-            if link.get("rel") == "next":
-                next_href = link.get("href")
-                break
-
-        if next_href:
-            # Si el href es relativo, resolver contra la URL actual
-            actual = httpx.URL(actual).join(next_href).human_repr()
-            await asyncio.sleep(1.5)  # backoff para evitar bloqueos/WAF
-        else:
-            actual = None
-
-async def iterate_all_feeds_async(feeds: List[str]):
-    """Orquesta todos los FEEDS base con un único cliente httpx."""
-    async with httpx.AsyncClient() as client:
-        for base in feeds:
-            try:
-                async for entry in iterate_feed_async(client, base):
-                    yield entry
-            except Exception as e:
-                # Log controlado: seguimos con los demás feeds si uno falla
-                print(f"[WARN] Fallo en feed {base}: {e}")
-                continue
-
-
-# ---------------------------
 #  AYUDAS GEOGRÁFICAS
 # ---------------------------
 PROVINCIAS = {
@@ -206,23 +143,32 @@ async def licitaciones_es(
 
     items = []
 
-    
-# ⬇️ REEMPLAZA TODO EL BLOQUE DE DESCARGA POR ESTE
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         for feed_url in FEEDS:
             try:
-                # Itera el feed con paginación rel="next" y cabeceras adecuadas
-                async for e in iterate_feed_async(client, feed_url):
+                r = await client.get(feed_url)
+                content = r.content
+
+                # ⚠️ Validación — si devuelve HTML en lugar del feed Atom, ignorar
+                if b"<feed" not in content[:2000].lower():
+                    print(f"⚠️ Feed no válido (HTML devuelto). Ignorando → {feed_url}")
+                    continue
+
+                xml = etree.fromstring(content)
+                entries = xml.xpath("//atom:entry", namespaces=NS)
+
+                for e in entries:
                     title = e.findtext(".//atom:title", namespaces=NS) or ""
                     updated = e.findtext(".//atom:updated", namespaces=NS) or ""
                     link_el = e.find(".//atom:link", namespaces=NS)
-                    url = link_el.get("href") if link_el is not None else None
+                    url = link_el.attrib.get("href") if link_el is not None else None
+
                     if not url:
                         continue
 
                     blob = _text(e)
 
-                    # Filtro por provincias/comunidades
+                    # Filtro por provincias
                     if not any(p.lower() in blob for p in provincias_filtrar):
                         continue
 
@@ -235,17 +181,17 @@ async def licitaciones_es(
                         "cpv_guess": _parse_posible_cpv(blob),
                         "feed_origen": feed_url
                     })
-    
+
                     Licitaciones_url.append(url)
 
+                    # Límite alcanzado
                     if len(items) >= limit:
                         break
-    
+
                 if len(items) >= limit:
                     break
 
             except Exception as e:
-                # Si el servidor devolvió HTML o hubo un error de parseo, se trapea aquí
                 print(f"⚠️ Error leyendo feed {feed_url}: {e}")
                 continue
 
@@ -386,6 +332,8 @@ async def detalle_licitacion(
         data["pliegos_xml"] = []
 
     return data
+
+
 
 
 
