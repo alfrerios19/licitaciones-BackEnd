@@ -44,12 +44,13 @@ app.add_middleware(
 #  FEEDS BASE
 # ---------------------------
 FEEDS = [
-    "https://contrataciondelestado.es/sindicacion/sindicacion_1/licitacionesPerfilesContratanteCompleto3.atom",
-    "https://contrataciondelestado.es/sindicacion/sindicacion_640/licitacionesPerfilesContratanteCompleto3.atom",
-    "https://contrataciondelestado.es/sindicacion/sindicacion_641/licitacionesPerfilesContratanteCompleto3.atom",
-    "https://contrataciondelestado.es/sindicacion/sindicacion_642/licitacionesPerfilesContratanteCompleto3.atom",
-    "https://contrataciondelestado.es/sindicacion/sindicacion_643/licitacionesPerfilesContratanteCompleto3.atom",
+    "https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_1/licitacionesPerfilesContratanteCompleto3.atom",
+    "https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_640/licitacionesPerfilesContratanteCompleto3.atom",
+    "https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_641/licitacionesPerfilesContratanteCompleto3.atom",
+    "https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_642/licitacionesPerfilesContratanteCompleto3.atom",
+    "https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_643/licitacionesPerfilesContratanteCompleto3.atom",
 ]
+
 NS = {"atom": "http://www.w3.org/2005/Atom"}
 
 # ---------------------------
@@ -332,6 +333,7 @@ async def detalle_licitacion(
         data["pliegos_xml"] = []
 
     return data
+
 
 
 
