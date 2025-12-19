@@ -210,6 +210,68 @@ async def licitaciones_es(
 
     return {"count": len(items), "results": items}
 
+@app.get("/comunidades_por_cpvs")
+async def comunidades_por_cpvs(
+    cpvs: List[str] = Query(..., description="Lista de CPVs (8 dígitos). Puedes repetir ?cpvs=XXXXXXX"),
+    limit_por_feed: int = Query(120, ge=10, le=300)
+):
+    """
+    Devuelve comunidades SUGERIDAS para unos CPVs de forma rápida (aproximada),
+    buscando CPVs de 8 dígitos dentro del texto del feed Atom (summary/content).
+
+    Nota: puede haber falsos negativos si el feed no incluye el CPV en el texto.
+    El filtrado final exacto se hace luego con Playwright al listar licitaciones.
+    """
+    # Normaliza CPVs: extrae solo códigos de 8 dígitos
+    joined = " ".join(cpvs)
+    cpvs_norm = set(re.findall(r"\b\d{8}\b", joined))
+    if not cpvs_norm:
+        raise HTTPException(status_code=400, detail="CPVs inválidos. Usa códigos de 8 dígitos (ej. 30200000).")
+
+    # Contador de coincidencias por comunidad
+    conteo: dict[str, int] = {c: 0 for c in COMUNIDADES.keys()}
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for feed_url in FEEDS:
+            try:
+                r = await client.get(feed_url)
+                content = r.content
+
+                # Si no es Atom/XML, ignorar
+                if b"<feed" not in content[:2000].lower():
+                    continue
+
+                xml = etree.fromstring(content)
+                entries = xml.xpath("//atom:entry", namespaces=NS)[:limit_por_feed]
+
+                for e in entries:
+                    blob = _text(e)  # summary+content en lower
+
+                    # CPVs que aparecen en el texto del feed
+                    cpvs_en_texto = set(re.findall(r"\b\d{8}\b", blob))
+                    if not (cpvs_en_texto & cpvs_norm):
+                        continue
+
+                    # Asignar comunidad por provincias (misma lógica que ya usas)
+                    for comunidad, provincias in COMUNIDADES.items():
+                        if any(p.lower() in blob for p in provincias):
+                            conteo[comunidad] += 1
+                            break
+
+            except Exception:
+                continue
+
+    sugeridas = [
+        {"comunidad": c, "matches": n}
+        for c, n in sorted(conteo.items(), key=lambda x: x[1], reverse=True)
+        if n > 0
+    ]
+
+    return {
+        "cpvs": sorted(cpvs_norm),
+        "sugeridas": sugeridas,
+        "nota": "Sugerencia aproximada: depende de que el feed Atom incluya CPV en el texto. El filtrado final por CPV se aplica de forma exacta en el paso de licitaciones."
+    }
 
 # =========================================================
 # 2️⃣ SCRAPER DE CPVs (usa subproceso Playwright)
@@ -339,6 +401,7 @@ async def detalle_licitacion(
         data["pliegos_xml"] = []
 
     return data
+
 
 
 
